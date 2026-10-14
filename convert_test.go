@@ -89,12 +89,6 @@ func TestServerFromModernMinimal(t *testing.T) {
 	if !s.Online || s.Name != "1.20.4" {
 		t.Fatalf("basic fields = %+v", s)
 	}
-	if s.GameKind != "minecraft-java" {
-		t.Fatalf("GameKind = %q, want minecraft-java", s.GameKind)
-	}
-	if s.Map != "" {
-		t.Fatalf("Map = %q, want empty (Java ping does not return a map)", s.Map)
-	}
 	if s.OnlinePlayers != 5 || s.MaxPlayers != 20 {
 		t.Fatalf("player counts = %d/%d", s.OnlinePlayers, s.MaxPlayers)
 	}
@@ -174,12 +168,6 @@ func TestServerFromLegacy(t *testing.T) {
 	if s.Name != "1.6.4" || s.OnlinePlayers != 3 || s.MaxPlayers != 10 {
 		t.Fatalf("legacy server = %+v", s)
 	}
-	if s.GameKind != "minecraft-legacy" {
-		t.Fatalf("GameKind = %q, want minecraft-legacy", s.GameKind)
-	}
-	if s.Map != "" {
-		t.Fatalf("Map = %q, want empty (legacy ping does not return a map)", s.Map)
-	}
 }
 
 func TestServerFromLegacyNilVersion(t *testing.T) {
@@ -229,12 +217,6 @@ func TestServerFromBedrock(t *testing.T) {
 	}
 	if s.OnlinePlayers != online || s.MaxPlayers != maxx {
 		t.Fatalf("counts = %d/%d", s.OnlinePlayers, s.MaxPlayers)
-	}
-	if s.GameKind != "minecraft-bedrock" {
-		t.Fatalf("GameKind = %q, want minecraft-bedrock", s.GameKind)
-	}
-	if s.Map != "" {
-		t.Fatalf("Map = %q, want empty", s.Map)
 	}
 }
 

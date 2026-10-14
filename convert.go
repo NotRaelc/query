@@ -1,7 +1,7 @@
 package query
 
 import (
-	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/NotRaelc/mcutil/v4/formatting"
@@ -11,63 +11,11 @@ import (
 	"github.com/woozymasta/a2s/pkg/keywords"
 )
 
-// textField extracts a named string field from a value, following
-// pointers. Returns "" when the field is absent or is not a string.
-// Used to bridge differences between mcutil versions where Name may be
-// either a string or a formatting.Result.
-func textField(v any, name string) string {
-	if v == nil {
-		return ""
+func derefOr[T any](p *T, def T) T {
+	if p == nil {
+		return def
 	}
-	rv := reflect.ValueOf(v)
-	for rv.Kind() == reflect.Ptr {
-		if rv.IsNil() {
-			return ""
-		}
-		rv = rv.Elem()
-	}
-	if rv.Kind() != reflect.Struct {
-		return ""
-	}
-	f := rv.FieldByName(name)
-	if !f.IsValid() || f.Kind() != reflect.String {
-		return ""
-	}
-	return f.String()
-}
-
-// cleanText returns the clean (no §-codes) representation of a
-// name-like value.
-func cleanText(v any) string {
-	if s, ok := v.(string); ok {
-		return s
-	}
-	if r, ok := v.(formatting.Result); ok {
-		return r.Clean
-	}
-	return textField(v, "Clean")
-}
-
-// rawText returns the raw (§-coded) representation.
-func rawText(v any) string {
-	if s, ok := v.(string); ok {
-		return s
-	}
-	if r, ok := v.(formatting.Result); ok {
-		return r.Raw
-	}
-	return textField(v, "Raw")
-}
-
-// htmlText returns the HTML representation.
-func htmlText(v any) string {
-	if s, ok := v.(string); ok {
-		return s
-	}
-	if r, ok := v.(formatting.Result); ok {
-		return r.HTML
-	}
-	return textField(v, "HTML")
+	return *p
 }
 
 func splitLines(s string) []string {
@@ -77,15 +25,15 @@ func splitLines(s string) []string {
 	return strings.Split(s, "\n")
 }
 
-// motdFromFormatting converts mcutil's Formatting result to a MOTD.
 func motdFromFormatting(r formatting.Result) *MOTD {
-	raw := splitLines(rawText(r))
-	clean := splitLines(cleanText(r))
-	html := splitLines(htmlText(r))
-	if raw == nil && clean == nil && html == nil {
+	if r.Raw == "" && r.Clean == "" && r.HTML == "" {
 		return nil
 	}
-	return &MOTD{Raw: raw, Clean: clean, HTML: html}
+	return &MOTD{
+		Raw:   splitLines(r.Raw),
+		Clean: splitLines(r.Clean),
+		HTML:  splitLines(r.HTML),
+	}
 }
 
 func motdFromPtrFormatting(r *formatting.Result) *MOTD {
@@ -95,7 +43,6 @@ func motdFromPtrFormatting(r *formatting.Result) *MOTD {
 	return motdFromFormatting(*r)
 }
 
-// motdFromString converts a plain string (Source name) to a MOTD.
 func motdFromString(s string) *MOTD {
 	if s == "" {
 		return nil
@@ -107,29 +54,35 @@ func motdFromString(s string) *MOTD {
 	}
 }
 
-func serverFromModern(resp *response.StatusModern, opts Options) Server {
-	s := Server{
-		GameKind: "minecraft-java",
+// newServer constructs a Server with the invariants that the public type
+// relies on: non-nil slices, GameID=-1, Online=true.
+func newServer(gameKind string, motd *MOTD, versions []string) Server {
+	if versions == nil {
+		versions = []string{}
+	}
+	return Server{
+		GameKind: gameKind,
 		Online:   true,
-		Name:     cleanText(resp.Version.Name),
 		GameID:   -1,
-		Protocol: resp.Version.Protocol,
-		Versions: ProtocolVersions(resp.Version.Protocol, false),
-		MOTD:     motdFromFormatting(resp.MOTD),
+		MOTD:     motd,
 		Players:  []Player{},
+		Versions: versions,
 	}
-	if s.Versions == nil {
-		s.Versions = []string{}
-	}
+}
+
+func serverFromModern(resp *response.StatusModern, opts Options) Server {
+	s := newServer(
+		"minecraft-java",
+		motdFromFormatting(resp.MOTD),
+		ProtocolVersions(resp.Version.Protocol, false),
+	)
+	s.Name = resp.Version.Name.Clean
+	s.Protocol = resp.Version.Protocol
 	if !opts.NoIcon && resp.Favicon != nil {
 		s.Icon = *resp.Favicon
 	}
-	if resp.Players.Online != nil {
-		s.OnlinePlayers = *resp.Players.Online
-	}
-	if resp.Players.Max != nil {
-		s.MaxPlayers = *resp.Players.Max
-	}
+	s.OnlinePlayers = derefOr(resp.Players.Online, 0)
+	s.MaxPlayers = derefOr(resp.Players.Max, 0)
 	if resp.Mods != nil {
 		s.Software = resp.Mods.Type
 		for _, m := range resp.Mods.List {
@@ -139,7 +92,7 @@ func serverFromModern(resp *response.StatusModern, opts Options) Server {
 	if !opts.NoPlayers {
 		for i, p := range resp.Players.Sample {
 			s.Players = append(s.Players, Player{
-				Name:  cleanText(p.Name),
+				Name:  p.Name.Clean,
 				ID:    p.ID,
 				Index: uint8(i),
 				Time:  -1,
@@ -150,81 +103,54 @@ func serverFromModern(resp *response.StatusModern, opts Options) Server {
 }
 
 func serverFromLegacy(resp *response.StatusLegacy, opts Options) Server {
-	s := Server{
-		GameKind: "minecraft-legacy",
-		Online:   true,
-		GameID:   -1,
-		MOTD:     motdFromFormatting(resp.MOTD),
-		Players:  []Player{},
-		Versions: []string{},
-	}
+	var (
+		name     string
+		protocol int64
+		versions []string
+	)
 	if resp.Version != nil {
-		s.Name = cleanText(resp.Version.Name)
-		s.Protocol = resp.Version.Protocol
-		s.Versions = ProtocolVersions(resp.Version.Protocol, true)
-		if s.Versions == nil {
-			s.Versions = []string{}
-		}
+		name = resp.Version.Name.Clean
+		protocol = resp.Version.Protocol
+		versions = ProtocolVersions(protocol, true)
 	}
+	s := newServer("minecraft-legacy", motdFromFormatting(resp.MOTD), versions)
+	s.Name = name
+	s.Protocol = protocol
 	s.OnlinePlayers = resp.Players.Online
 	s.MaxPlayers = resp.Players.Max
 	return s
 }
 
 func serverFromBedrock(resp *response.StatusBedrock, opts Options) Server {
-	s := Server{
-		GameKind: "minecraft-bedrock",
-		Online:   true,
-		GameID:   -1,
-		MOTD:     motdFromPtrFormatting(resp.MOTD),
-		Players:  []Player{},
-		Versions: []string{},
+	versions := []string{}
+	if resp.Version != nil {
+		versions = []string{*resp.Version}
 	}
+	s := newServer("minecraft-bedrock", motdFromPtrFormatting(resp.MOTD), versions)
 	if resp.Version != nil {
 		s.Name = *resp.Version
-		s.Versions = []string{*resp.Version}
 	}
-	if resp.ProtocolVersion != nil {
-		s.Protocol = *resp.ProtocolVersion
-	}
-	if resp.OnlinePlayers != nil {
-		s.OnlinePlayers = *resp.OnlinePlayers
-	}
-	if resp.MaxPlayers != nil {
-		s.MaxPlayers = *resp.MaxPlayers
-	}
-	if resp.Gamemode != nil {
-		s.Gamemode = *resp.Gamemode
-	}
-	if resp.GamemodeID != nil {
-		s.GamemodeID = *resp.GamemodeID
-	}
-	if resp.ServerID != nil {
-		s.ServerID = *resp.ServerID
-	}
-	if resp.Edition != nil {
-		s.Software = *resp.Edition
-	}
+	s.Protocol = derefOr(resp.ProtocolVersion, 0)
+	s.OnlinePlayers = derefOr(resp.OnlinePlayers, 0)
+	s.MaxPlayers = derefOr(resp.MaxPlayers, 0)
+	s.Gamemode = derefOr(resp.Gamemode, "")
+	s.GamemodeID = derefOr(resp.GamemodeID, 0)
+	s.ServerID = derefOr(resp.ServerID, "")
+	s.Software = derefOr(resp.Edition, "")
 	return s
 }
 
 func serverFromSource(info *a2s.Info, players []a2s.Player, opts Options) Server {
-	s := Server{
-		GameKind:      "source",
-		Online:        true,
-		Name:          info.Name,
-		Map:           info.Map,
-		GameID:        int64(info.EffectiveID()),
-		Protocol:      int64(info.Protocol),
-		Versions:      []string{info.Version},
-		OnlinePlayers: int64(info.Players),
-		MaxPlayers:    int64(info.MaxPlayers),
-		MOTD:          motdFromString(info.Name),
-		Software:      info.Game,
-		Players:       []Player{},
-	}
+	s := newServer("source", motdFromString(info.Name), []string{info.Version})
+	s.Name = info.Name
+	s.Map = info.Map
+	s.GameID = int64(info.EffectiveID())
+	s.Protocol = int64(info.Protocol)
+	s.OnlinePlayers = int64(info.Players)
+	s.MaxPlayers = int64(info.MaxPlayers)
+	s.Software = info.Game
 	if info.SteamID != 0 {
-		s.ServerID = formatUint(info.SteamID)
+		s.ServerID = strconv.FormatUint(info.SteamID, 10)
 	}
 	switch info.EffectiveID() {
 	case appid.Arma3:
@@ -258,18 +184,4 @@ func serverFromSource(info *a2s.Info, players []a2s.Player, opts Options) Server
 		}
 	}
 	return s
-}
-
-func formatUint(v uint64) string {
-	if v == 0 {
-		return "0"
-	}
-	var buf [20]byte
-	i := len(buf)
-	for v > 0 {
-		i--
-		buf[i] = byte('0' + v%10)
-		v /= 10
-	}
-	return string(buf[i:])
 }

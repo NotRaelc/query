@@ -46,31 +46,52 @@ func QueryServerOpts(ctx context.Context, addrStr string, opts Options) Response
 		return Response{Error: fmt.Errorf("%w: %q", ErrBlockedHost, host)}
 	}
 
-	var s Server
-	switch opts.Type {
-	case ServerSource:
-		s, err = querySource(ctx, host, port, opts)
-	case ServerMinecraftModern:
-		s, err = queryMinecraftModern(ctx, host, port, opts)
-	case ServerMinecraftLegacy:
-		s, err = queryMinecraftLegacy(ctx, host, port, opts)
-	case ServerMinecraftBedrock:
-		s, err = queryMinecraftBedrock(ctx, host, port, opts)
-	default:
+	if opts.Type == ServerAuto {
 		return queryAuto(ctx, host, port, opts)
 	}
-	if err == nil {
-		if s.IP == "" {
-			s.IP = host
-		}
-		if !isIPLiteral(host) {
-			s.Hostname = host
-		}
-		if s.Port == 0 {
-			s.Port = portOrDefault(port, defaultPortFor(opts.Type))
-		}
+
+	fn, ok := protocols[opts.Type]
+	if !ok {
+		return Response{Error: fmt.Errorf("query: unknown server type: %d", opts.Type)}
 	}
-	return Response{Error: err, Payload: s}
+
+	s, err := fn(ctx, host, port, opts)
+	if err != nil {
+		return Response{Error: err}
+	}
+	normalizeServer(&s, host, port, opts.Type)
+	return Response{Payload: s}
+}
+
+// normalizeServer fills IP / Hostname / Port on a Server if the protocol
+// layer did not. The proto argument is used to pick the default port.
+func normalizeServer(s *Server, host string, port uint16, proto ServerType) {
+	if s.IP == "" {
+		s.IP = host
+	}
+	if !isIPLiteral(host) {
+		s.Hostname = host
+	}
+	if s.Port == 0 {
+		s.Port = portOrDefault(port, defaultPortFor(proto))
+	}
+}
+
+// detectType maps a GameKind string back to a ServerType. Used by the
+// auto path, where the winning protocol is not known in advance.
+func detectType(gameKind string) ServerType {
+	switch gameKind {
+	case "minecraft-java":
+		return ServerMinecraftModern
+	case "minecraft-legacy":
+		return ServerMinecraftLegacy
+	case "minecraft-bedrock":
+		return ServerMinecraftBedrock
+	case "source":
+		return ServerSource
+	default:
+		return ServerAuto
+	}
 }
 
 // QueryMultipleServers queries many game servers in parallel, preserving
@@ -135,8 +156,8 @@ func QueryMultipleServersOpts(ctx context.Context, addrStrings []string, opts Op
 			defer func() { <-sem }()
 
 			addr := net.JoinHostPort(k.host, strconv.Itoa(int(k.port)))
-			// Port 0 means "not specified" — splitHostPort round-trip
-			// will lose it. Reconstruct only when non-zero.
+			// Port 0 means "not specified" — the JoinHostPort round-trip
+			// would lose that, so reconstruct the bare host.
 			if k.port == 0 {
 				addr = k.host
 			}
