@@ -1,4 +1,4 @@
-module query
+module github.com/NotRaelc/query
 
 go 1.27.1
 
