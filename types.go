@@ -26,9 +26,13 @@ func (r Response) MarshalJSON() ([]byte, error) {
 // Server is the unified representation of a game server.
 // Unpopulated fields use their zero value; numeric unknowns use -1.
 type Server struct {
+	// GameKind identifies the platform:
+	// "minecraft-java", "minecraft-legacy", "minecraft-bedrock", "source".
+	GameKind string `json:"game_kind,omitempty"`
+
 	Online   bool     `json:"online"`
 	Name     string   `json:"name"`
-	Map      string   `json:"map"`
+	Map      string   `json:"map"` // real map name, empty for Minecraft
 	GameID   int64    `json:"game_id"`
 	Protocol int64    `json:"protocol"`
 	Versions []string `json:"versions"`

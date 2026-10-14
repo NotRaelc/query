@@ -170,3 +170,8 @@ func IsDialError(err error) bool {
 	}
 	return false
 }
+
+func isIPLiteral(s string) bool {
+	_, err := netip.ParseAddr(s)
+	return err == nil
+}

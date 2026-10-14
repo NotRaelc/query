@@ -63,7 +63,9 @@ func QueryServerOpts(ctx context.Context, addrStr string, opts Options) Response
 		if s.IP == "" {
 			s.IP = host
 		}
-		s.Hostname = host
+		if !isIPLiteral(host) {
+			s.Hostname = host
+		}
 		s.Port = port
 	}
 	return Response{Error: err, Payload: s}

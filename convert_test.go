@@ -2,9 +2,11 @@ package query
 
 import (
 	"testing"
+	"time"
 
 	"github.com/mcstatus-io/mcutil/v4/formatting"
 	"github.com/mcstatus-io/mcutil/v4/response"
+	"github.com/woozymasta/a2s/pkg/a2s"
 )
 
 func TestMotdFromFormatting(t *testing.T) {
@@ -59,7 +61,7 @@ func TestMotdFromString(t *testing.T) {
 
 func TestServerFromModernMinimal(t *testing.T) {
 	online := int64(5)
-	max := int64(20)
+	maxx := int64(20)
 	favicon := "data:image/png;base64,xxx"
 	resp := &response.StatusModern{
 		Version: response.Version{
@@ -68,7 +70,7 @@ func TestServerFromModernMinimal(t *testing.T) {
 		},
 		Players: response.Players{
 			Online: &online,
-			Max:    &max,
+			Max:    &maxx,
 			Sample: []response.SamplePlayer{
 				{ID: "uuid-1", Name: formatting.Result{Clean: "Alice"}},
 				{ID: "uuid-2", Name: formatting.Result{Clean: "Bob"}},
@@ -78,8 +80,20 @@ func TestServerFromModernMinimal(t *testing.T) {
 		Favicon: &favicon,
 	}
 	s := serverFromModern(resp, Options{})
-	if !s.Online || s.Name != "1.20.4" || s.Map != "Minecraft" {
+	if s.GameKind != "minecraft-java" {
+		t.Fatalf("GameKind = %q, want minecraft-java", s.GameKind)
+	}
+	if s.Map != "" {
+		t.Fatalf("Map = %q, want empty (ping does not return the map)", s.Map)
+	}
+	if !s.Online || s.Name != "1.20.4" {
 		t.Fatalf("basic fields = %+v", s)
+	}
+	if s.GameKind != "minecraft-java" {
+		t.Fatalf("GameKind = %q, want minecraft-java", s.GameKind)
+	}
+	if s.Map != "" {
+		t.Fatalf("Map = %q, want empty (Java ping does not return a map)", s.Map)
 	}
 	if s.OnlinePlayers != 5 || s.MaxPlayers != 20 {
 		t.Fatalf("player counts = %d/%d", s.OnlinePlayers, s.MaxPlayers)
@@ -151,11 +165,20 @@ func TestServerFromLegacy(t *testing.T) {
 		MOTD:    formatting.Result{Clean: "hello"},
 	}
 	s := serverFromLegacy(resp, Options{})
+	if s.Map != "" {
+		t.Fatalf("Map = %q, want empty", s.Map)
+	}
+	if s.GameKind != "minecraft-legacy" {
+		t.Fatalf("GameKind = %q", s.GameKind)
+	}
 	if s.Name != "1.6.4" || s.OnlinePlayers != 3 || s.MaxPlayers != 10 {
 		t.Fatalf("legacy server = %+v", s)
 	}
-	if s.Map != "MinecraftOld" {
-		t.Fatalf("Map = %q, want MinecraftOld", s.Map)
+	if s.GameKind != "minecraft-legacy" {
+		t.Fatalf("GameKind = %q, want minecraft-legacy", s.GameKind)
+	}
+	if s.Map != "" {
+		t.Fatalf("Map = %q, want empty (legacy ping does not return a map)", s.Map)
 	}
 }
 
@@ -177,7 +200,7 @@ func TestServerFromBedrock(t *testing.T) {
 	serverID := "abc"
 	edition := "MCPE"
 	online := int64(4)
-	max := int64(10)
+	maxx := int64(10)
 	resp := &response.StatusBedrock{
 		Version:         &version,
 		ProtocolVersion: &protocol,
@@ -186,9 +209,15 @@ func TestServerFromBedrock(t *testing.T) {
 		ServerID:        &serverID,
 		Edition:         &edition,
 		OnlinePlayers:   &online,
-		MaxPlayers:      &max,
+		MaxPlayers:      &maxx,
 	}
 	s := serverFromBedrock(resp, Options{})
+	if s.Map != "" {
+		t.Fatalf("Map = %q, want empty", s.Map)
+	}
+	if s.GameKind != "minecraft-bedrock" {
+		t.Fatalf("GameKind = %q", s.GameKind)
+	}
 	if s.Name != version || s.Protocol != protocol {
 		t.Fatalf("bedrock fields = %+v", s)
 	}
@@ -198,11 +227,14 @@ func TestServerFromBedrock(t *testing.T) {
 	if s.ServerID != serverID || s.Software != edition {
 		t.Fatalf("serverid/software = %q/%q", s.ServerID, s.Software)
 	}
-	if s.OnlinePlayers != online || s.MaxPlayers != max {
+	if s.OnlinePlayers != online || s.MaxPlayers != maxx {
 		t.Fatalf("counts = %d/%d", s.OnlinePlayers, s.MaxPlayers)
 	}
-	if s.Map != "MinecraftBedrock" {
-		t.Fatalf("Map = %q", s.Map)
+	if s.GameKind != "minecraft-bedrock" {
+		t.Fatalf("GameKind = %q, want minecraft-bedrock", s.GameKind)
+	}
+	if s.Map != "" {
+		t.Fatalf("Map = %q, want empty", s.Map)
 	}
 }
 
@@ -210,5 +242,30 @@ func TestServerFromBedrockAllNil(t *testing.T) {
 	s := serverFromBedrock(&response.StatusBedrock{}, Options{})
 	if !s.Online || s.Name != "" || s.Protocol != 0 {
 		t.Fatalf("all-nil bedrock = %+v", s)
+	}
+}
+
+func TestServerFromSourceKeepsMap(t *testing.T) {
+	info := &a2s.Info{
+		Format: a2s.InfoFormat(a2s.ResponseInfo),
+		Name:   "test server",
+		Map:    "de_dust2",
+		Game:   "Counter-Strike",
+	}
+	players := []a2s.Player{
+		{Name: "p1", Index: 0, Duration: 60 * time.Second, Score: 5},
+	}
+	s := serverFromSource(info, players, Options{})
+	if s.GameKind != "source" {
+		t.Fatalf("GameKind = %q", s.GameKind)
+	}
+	if s.Map != "de_dust2" {
+		t.Fatalf("Map = %q, want de_dust2", s.Map)
+	}
+	if len(s.Players) != 1 || s.Players[0].Time != 60 {
+		t.Fatalf("players = %+v", s.Players)
+	}
+	if s.Players[0].ID != "-1" {
+		t.Fatalf("player ID = %q, want -1", s.Players[0].ID)
 	}
 }

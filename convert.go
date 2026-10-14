@@ -47,13 +47,16 @@ func motdFromString(s string) *MOTD {
 
 func serverFromModern(resp *response.StatusModern, opts Options) Server {
 	s := Server{
+		GameKind: "minecraft-java",
 		Online:   true,
 		Name:     resp.Version.Name.Clean,
-		Map:      "Minecraft",
+		// Map is intentionally empty: the Java ping protocol does not
+		// report the loaded map name.
 		GameID:   -1,
 		Protocol: resp.Version.Protocol,
 		Versions: ProtocolVersions(resp.Version.Protocol, false),
 		MOTD:     motdFromFormatting(resp.MOTD),
+		Players:  []Player{},
 	}
 	if !opts.NoIcon && resp.Favicon != nil {
 		s.Icon = *resp.Favicon
@@ -71,7 +74,6 @@ func serverFromModern(resp *response.StatusModern, opts Options) Server {
 		}
 	}
 	if !opts.NoPlayers {
-		s.Players = make([]Player, 0, len(resp.Players.Sample))
 		for i, p := range resp.Players.Sample {
 			s.Players = append(s.Players, Player{
 				Name:  p.Name.Clean,
@@ -86,15 +88,22 @@ func serverFromModern(resp *response.StatusModern, opts Options) Server {
 
 func serverFromLegacy(resp *response.StatusLegacy, opts Options) Server {
 	s := Server{
-		Online: true,
-		Map:    "MinecraftOld",
-		GameID: -1,
-		MOTD:   motdFromFormatting(resp.MOTD),
+		GameKind: "minecraft-legacy",
+		Online:   true,
+		// Map is intentionally empty: the legacy ping protocol does not
+		// report the loaded map name.
+		GameID:   -1,
+		MOTD:     motdFromFormatting(resp.MOTD),
+		Players:  []Player{},
+		Versions: []string{},
 	}
 	if resp.Version != nil {
 		s.Name = resp.Version.Name.Clean
 		s.Protocol = resp.Version.Protocol
 		s.Versions = ProtocolVersions(resp.Version.Protocol, true)
+		if s.Versions == nil {
+			s.Versions = []string{}
+		}
 	}
 	s.OnlinePlayers = resp.Players.Online
 	s.MaxPlayers = resp.Players.Max
@@ -103,10 +112,14 @@ func serverFromLegacy(resp *response.StatusLegacy, opts Options) Server {
 
 func serverFromBedrock(resp *response.StatusBedrock, opts Options) Server {
 	s := Server{
-		Online: true,
-		Map:    "MinecraftBedrock",
-		GameID: -1,
-		MOTD:   motdFromPtrFormatting(resp.MOTD),
+		GameKind: "minecraft-bedrock",
+		Online:   true,
+		// Map is intentionally empty: the Bedrock ping protocol does not
+		// report the loaded map name.
+		GameID:   -1,
+		MOTD:     motdFromPtrFormatting(resp.MOTD),
+		Players:  []Player{},
+		Versions: []string{},
 	}
 	if resp.Version != nil {
 		s.Name = *resp.Version
@@ -138,9 +151,10 @@ func serverFromBedrock(resp *response.StatusBedrock, opts Options) Server {
 
 func serverFromSource(info *a2s.Info, players []a2s.Player, opts Options) Server {
 	s := Server{
+		GameKind:      "source",
 		Online:        true,
 		Name:          info.Name,
-		Map:           info.Map,
+		Map:           info.Map, // real map name, e.g. "de_dust2"
 		GameID:        int64(info.EffectiveID()),
 		Protocol:      int64(info.Protocol),
 		Versions:      []string{info.Version},
@@ -148,10 +162,12 @@ func serverFromSource(info *a2s.Info, players []a2s.Player, opts Options) Server
 		MaxPlayers:    int64(info.MaxPlayers),
 		MOTD:          motdFromString(info.Name),
 		Software:      info.Game,
+		Players:       []Player{},
 	}
 	if info.SteamID != 0 {
 		s.ServerID = formatUint(info.SteamID)
 	}
+
 	// Game-specific keyword parsing for known AppIDs.
 	switch info.EffectiveID() {
 	case appid.Arma3:
@@ -161,7 +177,7 @@ func serverFromSource(info *a2s.Info, players []a2s.Player, opts Options) Server
 			s.Gamemode = arma.GameType.String()
 		}
 		if arma.Island != "" {
-			s.Map = arma.Island
+			s.Map = arma.Island // Island overrides the generic map for Arma 3.
 		}
 	case appid.DayZ, appid.DayZExperimental:
 		dayz := keywords.ParseDayZ(info.Keywords)
@@ -173,8 +189,8 @@ func serverFromSource(info *a2s.Info, players []a2s.Player, opts Options) Server
 			s.Port = dayz.GamePort
 		}
 	}
+
 	if !opts.NoPlayers {
-		s.Players = make([]Player, 0, len(players))
 		for _, p := range players {
 			s.Players = append(s.Players, Player{
 				Name:  p.Name,

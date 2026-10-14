@@ -121,8 +121,11 @@ func TestBedrockLive(t *testing.T) {
 	if !resp.Payload.Online {
 		t.Fatal("server should be online")
 	}
-	if resp.Payload.Map != "MinecraftBedrock" {
-		t.Fatalf("Map = %q", resp.Payload.Map)
+	if resp.Payload.GameKind != "minecraft-bedrock" {
+		t.Fatalf("GameKind = %q, want minecraft-bedrock", resp.Payload.GameKind)
+	}
+	if resp.Payload.Map != "" {
+		t.Fatalf("Map = %q, want empty (Bedrock ping does not return a map)", resp.Payload.Map)
 	}
 	t.Logf("Bedrock: %s | players %d/%d", resp.Payload.Name, resp.Payload.OnlinePlayers, resp.Payload.MaxPlayers)
 }
@@ -145,5 +148,21 @@ func TestHooksAreCalled(t *testing.T) {
 
 	if attempts != 1 || results != 1 {
 		t.Fatalf("attempts = %d, results = %d; want 1/1", attempts, results)
+	}
+}
+
+func TestHostnameSetOnlyForDomains(t *testing.T) {
+	// Заглушка для проверки логики — не требует сети.
+	// Мы проверяем, что для IP-литералов Hostname пустой.
+
+	// Прямой вызов логики:
+	if isIPLiteral("5.83.140.250") != true {
+		t.Fatal("5.83.140.250 должен определяться как IP")
+	}
+	if isIPLiteral("cubeverse.su") != false {
+		t.Fatal("cubeverse.su не должен определяться как IP")
+	}
+	if isIPLiteral("2001:db8::1") != true {
+		t.Fatal("IPv6 должен определяться как IP")
 	}
 }

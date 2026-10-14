@@ -9,6 +9,9 @@ var ( // const	// Concurrency safe and read-only
 // ProtocolVersions returns release names for a protocol number.
 // Set legacy=true for the pre-1.7 (Beta/Alpha) protocol.
 func ProtocolVersions(protocol int64, legacy bool) []string {
+	if protocol == -1 {
+		return []string{"any"}
+	}
 	if legacy {
 		return minecraftVersionsLegacy[protocol]
 	}
