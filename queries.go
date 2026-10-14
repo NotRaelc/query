@@ -41,14 +41,20 @@ func (h Hooks) result(host string, proto ServerType, err error, d time.Duration)
 	}
 }
 
+// ReceiveLimitBytes caps how much the underlying mcutil readers will
+// accept from the network. 1 MiB covers the largest expected status
+// and rules responses with headroom.
+const defaultReceiveLimit int64 = 1 << 20
+
 func queryMinecraftModern(ctx context.Context, host string, port uint16, opts Options) (Server, error) {
 	opts.Hooks.attempt(host, ServerMinecraftModern)
 	start := time.Now()
 	resp, err := status.Modern(ctx, host, port, options.StatusModern{
-		EnableSRV:       true,
-		Timeout:         ctxTimeout(ctx, opts.Timeout),
-		ProtocolVersion: -1,
-		Ping:            true,
+		EnableSRV:         true,
+		Timeout:           ctxTimeout(ctx, opts.Timeout),
+		ProtocolVersion:   -1,
+		ReceiveLimitBytes: defaultReceiveLimit,
+		Ping:              true,
 	})
 	opts.Hooks.result(host, ServerMinecraftModern, err, time.Since(start))
 	if err != nil {
@@ -61,9 +67,10 @@ func queryMinecraftLegacy(ctx context.Context, host string, port uint16, opts Op
 	opts.Hooks.attempt(host, ServerMinecraftLegacy)
 	start := time.Now()
 	resp, err := status.Legacy(ctx, host, port, options.StatusLegacy{
-		EnableSRV:       true,
-		Timeout:         ctxTimeout(ctx, opts.Timeout),
-		ProtocolVersion: -1,
+		EnableSRV:         true,
+		Timeout:           ctxTimeout(ctx, opts.Timeout),
+		ProtocolVersion:   -1,
+		ReceiveLimitBytes: defaultReceiveLimit,
 	})
 	opts.Hooks.result(host, ServerMinecraftLegacy, err, time.Since(start))
 	if err != nil {
@@ -76,7 +83,8 @@ func queryMinecraftBedrock(ctx context.Context, host string, port uint16, opts O
 	opts.Hooks.attempt(host, ServerMinecraftBedrock)
 	start := time.Now()
 	resp, err := status.Bedrock(ctx, host, port, options.StatusBedrock{
-		Timeout: ctxTimeout(ctx, opts.Timeout),
+		Timeout:           ctxTimeout(ctx, opts.Timeout),
+		ReceiveLimitBytes: defaultReceiveLimit,
 	})
 	opts.Hooks.result(host, ServerMinecraftBedrock, err, time.Since(start))
 	if err != nil {
