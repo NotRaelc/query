@@ -6,40 +6,47 @@ import (
 	"time"
 )
 
-// Response wraps a query result. Error is nil on success.
+// Response wraps a query result.
+//
+// On success Error is nil and Payload contains the server data.
+// On failure Error is non-nil and Payload is the zero value.
 type Response struct {
 	Error   error  `json:"-"`
 	Payload Server `json:"payload"`
 }
 
+// MarshalJSON emits either {"payload": ...} on success or {"error": "..."}
+// on failure. The Payload field is omitted when Error is set, so consumers
+// do not need to skip a placeholder object.
 func (r Response) MarshalJSON() ([]byte, error) {
-	errStr := ""
 	if r.Error != nil {
-		errStr = r.Error.Error()
+		return json.Marshal(struct {
+			Error string `json:"error"`
+		}{Error: r.Error.Error()})
 	}
 	return json.Marshal(struct {
-		Error   string `json:"error,omitempty"`
 		Payload Server `json:"payload"`
-	}{Error: errStr, Payload: r.Payload})
+	}{Payload: r.Payload})
 }
 
-// Server is the unified representation of a game server.
-// Unpopulated fields use their zero value; numeric unknowns use -1.
+// Server is the unified representation of a game server. Unpopulated
+// fields use their zero value; numeric unknowns use -1. Slice fields are
+// always non-nil in JSON, so consumers do not need nil checks.
 type Server struct {
-	// GameKind identifies the platform:
-	// "minecraft-java", "minecraft-legacy", "minecraft-bedrock", "source".
+	// GameKind is one of "minecraft-java", "minecraft-legacy",
+	// "minecraft-bedrock", "source".
 	GameKind string `json:"game_kind,omitempty"`
 
 	Online   bool     `json:"online"`
 	Name     string   `json:"name"`
-	Map      string   `json:"map"` // real map name, empty for Minecraft
+	Map      string   `json:"map"` // real map name; empty for Minecraft ping
 	GameID   int64    `json:"game_id"`
 	Protocol int64    `json:"protocol"`
 	Versions []string `json:"versions"`
 
 	IP       string `json:"ip"`
 	Port     uint16 `json:"port"`
-	Hostname string `json:"hostname,omitempty"`
+	Hostname string `json:"hostname,omitempty"` // set only for domain inputs
 
 	Players       []Player `json:"players"`
 	OnlinePlayers int64    `json:"online_players"`
@@ -55,14 +62,16 @@ type Server struct {
 	Plugins     []Plugin   `json:"plugins,omitempty"`
 	Mods        []Mod      `json:"mods,omitempty"`
 	Info        *MOTD      `json:"info,omitempty"`
-	Keywords    any        `json:"keywords,omitempty"`
+	Keywords    any        `json:"keywords,omitempty"` // Arma 3 / DayZ typed keywords
 	Debug       *DebugInfo `json:"debug,omitempty"`
 }
 
+// MOTD holds the message of the day in three forms. Each slice element
+// is one line.
 type MOTD struct {
-	Raw   []string `json:"raw,omitempty"`
-	Clean []string `json:"clean,omitempty"`
-	HTML  []string `json:"html,omitempty"`
+	Raw   []string `json:"raw,omitempty"`   // original with §-codes
+	Clean []string `json:"clean,omitempty"` // plain text
+	HTML  []string `json:"html,omitempty"`  // with <span style="color: ...">
 }
 
 type Plugin struct {
@@ -91,7 +100,7 @@ type DebugInfo struct {
 // Player is one player entry. Time is in seconds; -1 means unknown.
 type Player struct {
 	Name  string `json:"name"`
-	ID    string `json:"id"`
+	ID    string `json:"id"` // UUID for Java, "-1" for Source
 	Time  int64  `json:"time"`
 	Score int32  `json:"score,omitempty"`
 	Index uint8  `json:"index"`
@@ -124,31 +133,45 @@ func (t ServerType) String() string {
 	}
 }
 
-// Options configures a single or batch query. Zero values are replaced
-// with defaults by withDefaults.
+// Options configures a single or batch query. The zero value is valid.
+//
+// Timeout is not part of Options. It is taken from ctx.Deadline(). If
+// ctx has no deadline, DefaultTimeout is used.
 type Options struct {
-	Timeout       time.Duration
-	Type          ServerType
-	NoIcon        bool
-	NoPlayers     bool
+	// Type selects the protocol. Zero means ServerAuto.
+	Type ServerType
+
+	// NoIcon omits Server.Icon from the result.
+	NoIcon bool
+
+	// NoPlayers omits Server.Players from the result.
+	NoPlayers bool
+
+	// MaxConcurrent bounds parallel queries in a batch.
+	// Zero uses DefaultMaxConcurrent.
 	MaxConcurrent int
-	Hooks         Hooks
-	Resolver      Resolver
+
+	// AllowLocalhost disables the loopback/unspecified check.
+	// Intended for local testing only. Never enable on a public API.
+	AllowLocalhost bool
+
+	// Hooks receives protocol-level callbacks. All fields are optional.
+	Hooks Hooks
+
+	// Resolver overrides the default DNS resolver. Nil means the system one.
+	Resolver Resolver
 }
 
-// Hooks receives protocol-level callbacks. All fields are optional.
+// Hooks receives protocol-level callbacks.
 type Hooks struct {
 	// OnAttempt is called before each protocol request.
 	OnAttempt func(host string, proto ServerType)
+
 	// OnResult is called after each protocol request, success or failure.
 	OnResult func(host string, proto ServerType, err error, d time.Duration)
 }
 
 // ProtocolError wraps an error with the protocol that produced it.
-// Use errors.As to extract the ServerType:
-//
-//	var pe *query.ProtocolError
-//	if errors.As(err, &pe) { ... pe.Proto ... }
 type ProtocolError struct {
 	Proto ServerType
 	Err   error
@@ -163,12 +186,11 @@ const (
 	DefaultMaxConcurrent = 20
 	DefaultMinecraftPort = 25565
 	DefaultBedrockPort   = 19132
+	DefaultSourcePort    = 27015
 )
 
 var (
 	ErrTimeout        = errors.New("query timeout exceeded")
 	ErrProtocolFailed = errors.New("protocol query failed")
-	// ErrBlockedHost is returned when the target is localhost,
-	// loopback, or an unspecified address.
-	ErrBlockedHost = errors.New("query: host is blocked")
+	ErrBlockedHost    = errors.New("query: host is blocked")
 )

@@ -18,17 +18,15 @@ func TestSplitHostPort(t *testing.T) {
 		wantErr bool
 	}{
 		{"host with port", "example.com:25565", "example.com", 25565, false},
-		{"host without port", "example.com", "example.com", DefaultMinecraftPort, false},
+		{"host without port", "example.com", "example.com", 0, false},
 		{"ipv4 with port", "127.0.0.1:19132", "127.0.0.1", 19132, false},
-		{"ipv4 without port", "127.0.0.1", "127.0.0.1", DefaultMinecraftPort, false},
+		{"ipv4 without port", "127.0.0.1", "127.0.0.1", 0, false},
 		{"empty host with port", ":25565", "127.0.0.1", 25565, false},
-		{"zero port", "example.com:0", "example.com", DefaultMinecraftPort, false},
 		{"bracketed ipv6", "[2001:db8::1]:25565", "2001:db8::1", 25565, false},
-		{"bracketed ipv6 no port", "[2001:db8::1]", "2001:db8::1", DefaultMinecraftPort, false},
-		{"bare ipv6 no port", "2001:db8::1", "2001:db8::1", DefaultMinecraftPort, false},
+		{"bracketed ipv6 no port", "[2001:db8::1]", "2001:db8::1", 0, false},
+		{"bare ipv6 no port", "2001:db8::1", "2001:db8::1", 0, false},
 		{"bare ipv6 with port", "[2001:db8::1]:25565", "2001:db8::1", 25565, false},
 
-		// Regression: caught by FuzzSplitHostPort.
 		{"empty string", "", "", 0, true},
 		{"whitespace only", "   ", "", 0, true},
 		{"tab only", "\t", "", 0, true},
@@ -43,6 +41,9 @@ func TestSplitHostPort(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("SplitHostPort(%q) = (%q, %d, nil), want error", tt.in, host, port)
+				}
+				if host != "" || port != 0 {
+					t.Fatalf("on error want zero values, got (%q, %d)", host, port)
 				}
 				return
 			}
@@ -147,8 +148,6 @@ func TestIsBlockedHostRealResolver(t *testing.T) {
 	}
 }
 
-// Ensure Options with a Resolver type is compatible with Resolver
-// signature. This is a compile-time check as much as a runtime one.
 func TestResolverTypeAcceptsFunction(t *testing.T) {
 	var r Resolver = func(_ context.Context, _ string) ([]netip.Addr, error) {
 		return nil, nil

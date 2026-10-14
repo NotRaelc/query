@@ -4,13 +4,28 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"time"
 
-	"github.com/mcstatus-io/mcutil/v4/options"
-	"github.com/mcstatus-io/mcutil/v4/status"
+	"github.com/NotRaelc/mcutil/v4/options"
+	"github.com/NotRaelc/mcutil/v4/status"
 	"github.com/woozymasta/a2s/pkg/a2s"
 )
 
+// defaultReceiveLimit bounds how much mcutil reads from the socket.
+// Without it, mcutil's io.LimitReader(conn, 0) returns EOF immediately.
+const defaultReceiveLimit int64 = 1 << 20 // 1 MiB
+
+// portOrDefault returns port if non-zero, otherwise the protocol default.
+func portOrDefault(port uint16, def uint16) uint16 {
+	if port != 0 {
+		return port
+	}
+	return def
+}
+
+// graceOr returns min(d, remaining time until ctx deadline).
+// If ctx has no deadline, returns d unchanged.
 func graceOr(ctx context.Context, d time.Duration) time.Duration {
 	if dl, ok := ctx.Deadline(); ok {
 		if remain := time.Until(dl); remain < d {
@@ -18,15 +33,6 @@ func graceOr(ctx context.Context, d time.Duration) time.Duration {
 		}
 	}
 	return d
-}
-
-func ctxTimeout(ctx context.Context, def time.Duration) time.Duration {
-	if dl, ok := ctx.Deadline(); ok {
-		if d := time.Until(dl); d > 0 && d < def {
-			return d
-		}
-	}
-	return def
 }
 
 func (h Hooks) attempt(host string, proto ServerType) {
@@ -41,19 +47,14 @@ func (h Hooks) result(host string, proto ServerType, err error, d time.Duration)
 	}
 }
 
-// ReceiveLimitBytes caps how much the underlying mcutil readers will
-// accept from the network. 1 MiB covers the largest expected status
-// and rules responses with headroom.
-const defaultReceiveLimit int64 = 1 << 20
-
 func queryMinecraftModern(ctx context.Context, host string, port uint16, opts Options) (Server, error) {
+	port = portOrDefault(port, DefaultMinecraftPort)
 	opts.Hooks.attempt(host, ServerMinecraftModern)
 	start := time.Now()
 	resp, err := status.Modern(ctx, host, port, options.StatusModern{
 		EnableSRV:         true,
-		Timeout:           ctxTimeout(ctx, opts.Timeout),
-		ProtocolVersion:   -1,
 		ReceiveLimitBytes: defaultReceiveLimit,
+		ProtocolVersion:   -1,
 		Ping:              true,
 	})
 	opts.Hooks.result(host, ServerMinecraftModern, err, time.Since(start))
@@ -64,13 +65,13 @@ func queryMinecraftModern(ctx context.Context, host string, port uint16, opts Op
 }
 
 func queryMinecraftLegacy(ctx context.Context, host string, port uint16, opts Options) (Server, error) {
+	port = portOrDefault(port, DefaultMinecraftPort)
 	opts.Hooks.attempt(host, ServerMinecraftLegacy)
 	start := time.Now()
 	resp, err := status.Legacy(ctx, host, port, options.StatusLegacy{
 		EnableSRV:         true,
-		Timeout:           ctxTimeout(ctx, opts.Timeout),
-		ProtocolVersion:   -1,
 		ReceiveLimitBytes: defaultReceiveLimit,
+		ProtocolVersion:   -1,
 	})
 	opts.Hooks.result(host, ServerMinecraftLegacy, err, time.Since(start))
 	if err != nil {
@@ -80,11 +81,12 @@ func queryMinecraftLegacy(ctx context.Context, host string, port uint16, opts Op
 }
 
 func queryMinecraftBedrock(ctx context.Context, host string, port uint16, opts Options) (Server, error) {
+	port = portOrDefault(port, DefaultBedrockPort)
 	opts.Hooks.attempt(host, ServerMinecraftBedrock)
 	start := time.Now()
 	resp, err := status.Bedrock(ctx, host, port, options.StatusBedrock{
-		Timeout:           ctxTimeout(ctx, opts.Timeout),
 		ReceiveLimitBytes: defaultReceiveLimit,
+		ClientGUID:        rand.Int63(),
 	})
 	opts.Hooks.result(host, ServerMinecraftBedrock, err, time.Since(start))
 	if err != nil {
@@ -93,7 +95,9 @@ func queryMinecraftBedrock(ctx context.Context, host string, port uint16, opts O
 	return serverFromBedrock(resp, opts), nil
 }
 
-// queryMinecraft runs modern and legacy in parallel, giving modern priority.
+// queryMinecraft runs modern and legacy in parallel. Modern has priority:
+// on success we return immediately. If legacy wins first we give modern
+// modernGrace to complete, else return legacy's result.
 func queryMinecraft(ctx context.Context, host string, port uint16, opts Options) (Server, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -143,6 +147,7 @@ func queryMinecraft(ctx context.Context, host string, port uint16, opts Options)
 }
 
 func querySource(ctx context.Context, host string, port uint16, opts Options) (Server, error) {
+	port = portOrDefault(port, DefaultSourcePort)
 	opts.Hooks.attempt(host, ServerSource)
 	start := time.Now()
 
@@ -151,7 +156,7 @@ func querySource(ctx context.Context, host string, port uint16, opts Options) (S
 		opts.Hooks.result(host, ServerSource, err, time.Since(start))
 		return Server{}, err
 	}
-	client, err := a2s.New(addr.String(), int(port), a2s.WithTimeout(ctxTimeout(ctx, opts.Timeout)))
+	client, err := a2s.New(addr.String(), int(port), a2s.WithTimeout(DefaultTimeout))
 	if err != nil {
 		opts.Hooks.result(host, ServerSource, err, time.Since(start))
 		return Server{}, err
@@ -179,9 +184,6 @@ func querySource(ctx context.Context, host string, port uint16, opts Options) (S
 	return s, nil
 }
 
-// queryAuto probes Minecraft Java, Bedrock, and Source in parallel.
-// The first successful response wins; on total failure, Minecraft's
-// error is preferred, then Bedrock's, then Source's.
 func queryAuto(ctx context.Context, host string, port uint16, opts Options) Response {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

@@ -6,24 +6,24 @@ import (
 	"net"
 	"strconv"
 	"sync"
-	"time"
 )
 
-// withDefaults fills zero fields with their defaults.
 func (o Options) withDefaults() Options {
-	if o.Timeout <= 0 {
-		o.Timeout = DefaultTimeout
-	}
 	if o.MaxConcurrent <= 0 {
 		o.MaxConcurrent = DefaultMaxConcurrent
 	}
 	return o
 }
 
-// QueryServer is the main entry point. If no ServerType is provided,
-// ServerAuto is used. localhost and loopback addresses are rejected.
-func QueryServer(ctx context.Context, addrStr string, timeout time.Duration, st ...ServerType) Response {
-	opts := Options{Timeout: timeout}
+// QueryServer queries one game server. The timeout is taken from ctx.
+// If ctx has no deadline, DefaultTimeout is applied.
+//
+//	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+//	defer cancel()
+//	resp := query.QueryServer(ctx, "play.example.com")
+//	resp = query.QueryServer(ctx, "play.example.com", query.ServerSource)
+func QueryServer(ctx context.Context, addrStr string, st ...ServerType) Response {
+	opts := Options{}
 	if len(st) > 0 {
 		opts.Type = st[0]
 	}
@@ -32,15 +32,15 @@ func QueryServer(ctx context.Context, addrStr string, timeout time.Duration, st 
 
 // QueryServerOpts is the options-aware variant of QueryServer.
 func QueryServerOpts(ctx context.Context, addrStr string, opts Options) Response {
+	ctx, cancel := ensureDeadline(ctx)
+	defer cancel()
+
 	opts = opts.withDefaults()
 
 	host, port, err := SplitHostPort(addrStr)
 	if err != nil {
 		return Response{Error: err}
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
-	defer cancel()
 
 	if opts.isBlocked(ctx, host) {
 		return Response{Error: fmt.Errorf("%w: %q", ErrBlockedHost, host)}
@@ -66,16 +66,18 @@ func QueryServerOpts(ctx context.Context, addrStr string, opts Options) Response
 		if !isIPLiteral(host) {
 			s.Hostname = host
 		}
-		s.Port = port
+		if s.Port == 0 {
+			s.Port = portOrDefault(port, defaultPortFor(opts.Type))
+		}
 	}
 	return Response{Error: err, Payload: s}
 }
 
-// QueryMultipleServers queries many addresses in parallel, preserving
+// QueryMultipleServers queries many game servers in parallel, preserving
 // the input order. Duplicates are queried once; the same Response is
 // returned for every duplicate slot.
-func QueryMultipleServers(ctx context.Context, addrStrings []string, timeout time.Duration, st ...ServerType) []Response {
-	opts := Options{Timeout: timeout}
+func QueryMultipleServers(ctx context.Context, addrStrings []string, st ...ServerType) []Response {
+	opts := Options{}
 	if len(st) > 0 {
 		opts.Type = st[0]
 	}
@@ -84,12 +86,13 @@ func QueryMultipleServers(ctx context.Context, addrStrings []string, timeout tim
 
 // QueryMultipleServersOpts is the options-aware variant.
 func QueryMultipleServersOpts(ctx context.Context, addrStrings []string, opts Options) []Response {
+	ctx, cancel := ensureDeadline(ctx)
+	defer cancel()
+
 	opts = opts.withDefaults()
 
 	out := make([]Response, len(addrStrings))
 
-	// Group inputs by (host, port, kind). Invalid entries are recorded
-	// immediately and skipped from scheduling.
 	type key struct {
 		host string
 		port uint16
@@ -132,6 +135,11 @@ func QueryMultipleServersOpts(ctx context.Context, addrStrings []string, opts Op
 			defer func() { <-sem }()
 
 			addr := net.JoinHostPort(k.host, strconv.Itoa(int(k.port)))
+			// Port 0 means "not specified" — splitHostPort round-trip
+			// will lose it. Reconstruct only when non-zero.
+			if k.port == 0 {
+				addr = k.host
+			}
 			perCall := opts
 			perCall.Type = k.kind
 			resp := QueryServerOpts(ctx, addr, perCall)
@@ -150,4 +158,24 @@ func QueryMultipleServersOpts(ctx context.Context, addrStrings []string, opts Op
 		}
 	}
 	return out
+}
+
+// ensureDeadline returns a context with a deadline. If ctx already has
+// one, it is returned unchanged. Otherwise, DefaultTimeout is applied.
+func ensureDeadline(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, DefaultTimeout)
+}
+
+func defaultPortFor(t ServerType) uint16 {
+	switch t {
+	case ServerMinecraftBedrock:
+		return DefaultBedrockPort
+	case ServerSource:
+		return DefaultSourcePort
+	default:
+		return DefaultMinecraftPort
+	}
 }

@@ -1,14 +1,74 @@
 package query
 
 import (
+	"reflect"
 	"strings"
 
-	"github.com/mcstatus-io/mcutil/v4/formatting"
-	"github.com/mcstatus-io/mcutil/v4/response"
+	"github.com/NotRaelc/mcutil/v4/formatting"
+	"github.com/NotRaelc/mcutil/v4/response"
 	"github.com/woozymasta/a2s/pkg/a2s"
 	"github.com/woozymasta/a2s/pkg/appid"
 	"github.com/woozymasta/a2s/pkg/keywords"
 )
+
+// textField extracts a named string field from a value, following
+// pointers. Returns "" when the field is absent or is not a string.
+// Used to bridge differences between mcutil versions where Name may be
+// either a string or a formatting.Result.
+func textField(v any, name string) string {
+	if v == nil {
+		return ""
+	}
+	rv := reflect.ValueOf(v)
+	for rv.Kind() == reflect.Ptr {
+		if rv.IsNil() {
+			return ""
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Struct {
+		return ""
+	}
+	f := rv.FieldByName(name)
+	if !f.IsValid() || f.Kind() != reflect.String {
+		return ""
+	}
+	return f.String()
+}
+
+// cleanText returns the clean (no §-codes) representation of a
+// name-like value.
+func cleanText(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	if r, ok := v.(formatting.Result); ok {
+		return r.Clean
+	}
+	return textField(v, "Clean")
+}
+
+// rawText returns the raw (§-coded) representation.
+func rawText(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	if r, ok := v.(formatting.Result); ok {
+		return r.Raw
+	}
+	return textField(v, "Raw")
+}
+
+// htmlText returns the HTML representation.
+func htmlText(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	if r, ok := v.(formatting.Result); ok {
+		return r.HTML
+	}
+	return textField(v, "HTML")
+}
 
 func splitLines(s string) []string {
 	if s == "" {
@@ -17,10 +77,11 @@ func splitLines(s string) []string {
 	return strings.Split(s, "\n")
 }
 
+// motdFromFormatting converts mcutil's Formatting result to a MOTD.
 func motdFromFormatting(r formatting.Result) *MOTD {
-	raw := splitLines(r.Raw)
-	clean := splitLines(r.Clean)
-	html := splitLines(r.HTML)
+	raw := splitLines(rawText(r))
+	clean := splitLines(cleanText(r))
+	html := splitLines(htmlText(r))
 	if raw == nil && clean == nil && html == nil {
 		return nil
 	}
@@ -34,6 +95,7 @@ func motdFromPtrFormatting(r *formatting.Result) *MOTD {
 	return motdFromFormatting(*r)
 }
 
+// motdFromString converts a plain string (Source name) to a MOTD.
 func motdFromString(s string) *MOTD {
 	if s == "" {
 		return nil
@@ -49,14 +111,15 @@ func serverFromModern(resp *response.StatusModern, opts Options) Server {
 	s := Server{
 		GameKind: "minecraft-java",
 		Online:   true,
-		Name:     resp.Version.Name.Clean,
-		// Map is intentionally empty: the Java ping protocol does not
-		// report the loaded map name.
+		Name:     cleanText(resp.Version.Name),
 		GameID:   -1,
 		Protocol: resp.Version.Protocol,
 		Versions: ProtocolVersions(resp.Version.Protocol, false),
 		MOTD:     motdFromFormatting(resp.MOTD),
 		Players:  []Player{},
+	}
+	if s.Versions == nil {
+		s.Versions = []string{}
 	}
 	if !opts.NoIcon && resp.Favicon != nil {
 		s.Icon = *resp.Favicon
@@ -76,7 +139,7 @@ func serverFromModern(resp *response.StatusModern, opts Options) Server {
 	if !opts.NoPlayers {
 		for i, p := range resp.Players.Sample {
 			s.Players = append(s.Players, Player{
-				Name:  p.Name.Clean,
+				Name:  cleanText(p.Name),
 				ID:    p.ID,
 				Index: uint8(i),
 				Time:  -1,
@@ -90,15 +153,13 @@ func serverFromLegacy(resp *response.StatusLegacy, opts Options) Server {
 	s := Server{
 		GameKind: "minecraft-legacy",
 		Online:   true,
-		// Map is intentionally empty: the legacy ping protocol does not
-		// report the loaded map name.
 		GameID:   -1,
 		MOTD:     motdFromFormatting(resp.MOTD),
 		Players:  []Player{},
 		Versions: []string{},
 	}
 	if resp.Version != nil {
-		s.Name = resp.Version.Name.Clean
+		s.Name = cleanText(resp.Version.Name)
 		s.Protocol = resp.Version.Protocol
 		s.Versions = ProtocolVersions(resp.Version.Protocol, true)
 		if s.Versions == nil {
@@ -114,8 +175,6 @@ func serverFromBedrock(resp *response.StatusBedrock, opts Options) Server {
 	s := Server{
 		GameKind: "minecraft-bedrock",
 		Online:   true,
-		// Map is intentionally empty: the Bedrock ping protocol does not
-		// report the loaded map name.
 		GameID:   -1,
 		MOTD:     motdFromPtrFormatting(resp.MOTD),
 		Players:  []Player{},
@@ -154,7 +213,7 @@ func serverFromSource(info *a2s.Info, players []a2s.Player, opts Options) Server
 		GameKind:      "source",
 		Online:        true,
 		Name:          info.Name,
-		Map:           info.Map, // real map name, e.g. "de_dust2"
+		Map:           info.Map,
 		GameID:        int64(info.EffectiveID()),
 		Protocol:      int64(info.Protocol),
 		Versions:      []string{info.Version},
@@ -167,8 +226,6 @@ func serverFromSource(info *a2s.Info, players []a2s.Player, opts Options) Server
 	if info.SteamID != 0 {
 		s.ServerID = formatUint(info.SteamID)
 	}
-
-	// Game-specific keyword parsing for known AppIDs.
 	switch info.EffectiveID() {
 	case appid.Arma3:
 		arma := keywords.ParseArma3(info.Keywords)
@@ -177,7 +234,7 @@ func serverFromSource(info *a2s.Info, players []a2s.Player, opts Options) Server
 			s.Gamemode = arma.GameType.String()
 		}
 		if arma.Island != "" {
-			s.Map = arma.Island // Island overrides the generic map for Arma 3.
+			s.Map = arma.Island
 		}
 	case appid.DayZ, appid.DayZExperimental:
 		dayz := keywords.ParseDayZ(info.Keywords)
@@ -189,7 +246,6 @@ func serverFromSource(info *a2s.Info, players []a2s.Player, opts Options) Server
 			s.Port = dayz.GamePort
 		}
 	}
-
 	if !opts.NoPlayers {
 		for _, p := range players {
 			s.Players = append(s.Players, Player{
@@ -204,7 +260,6 @@ func serverFromSource(info *a2s.Info, players []a2s.Player, opts Options) Server
 	return s
 }
 
-// formatUint formats an unsigned integer without importing strconv here.
 func formatUint(v uint64) string {
 	if v == 0 {
 		return "0"

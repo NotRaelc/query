@@ -1,3 +1,7 @@
+github.com/NotRaelc/mcutil/v4 v4.3.1-fork.2 h1:mDxjPRWpVKIOKkkBCz0A7AJF+R/lZsmKnRyy8h8DBXk=
+github.com/NotRaelc/mcutil/v4 v4.3.1-fork.2/go.mod h1:FeNz00sNp57BHqcrJZ8d+aI21OfAG9DIFsnljmlJZS8=
+github.com/NotRaelc/mcutil/v4 v4.3.1-fork.2.0.20261014214026-ab70ac047909 h1:XRXosSgpG9nnSTlIxnTeYtGVKYVbcYj3XI9LHDad/6M=
+github.com/NotRaelc/mcutil/v4 v4.3.1-fork.2.0.20261014214026-ab70ac047909/go.mod h1:FeNz00sNp57BHqcrJZ8d+aI21OfAG9DIFsnljmlJZS8=
 github.com/mcstatus-io/mcutil/v4 v4.3.1 h1:OvuZfl8p4R2xUv7GuC8cF1UnxaePUFGA40NjC2JDGBk=
 github.com/mcstatus-io/mcutil/v4 v4.3.1/go.mod h1:PGyTrx9UNvWVDHxbYQT89es9AWPkv5pAc6BAlFHm4fU=
 github.com/woozymasta/a2s v0.4.0 h1:TcCifIOaKzqJT7upyw7YsR8FV0rzWIEAZTq1EhysT6Q=

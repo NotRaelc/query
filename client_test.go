@@ -10,7 +10,7 @@ import (
 
 func TestQueryServerBlocksLocalhost(t *testing.T) {
 	ctx := context.Background()
-	opts := Options{Timeout: time.Second, Resolver: fakeResolver}
+	opts := Options{Resolver: fakeResolver}
 
 	for _, addr := range []string{
 		"localhost", "localhost:25565", "127.0.0.1:25565",
@@ -26,7 +26,7 @@ func TestQueryServerBlocksLocalhost(t *testing.T) {
 }
 
 func TestQueryServerInvalidAddress(t *testing.T) {
-	resp := QueryServer(context.Background(), "", time.Second)
+	resp := QueryServer(context.Background(), "")
 	if resp.Error == nil {
 		t.Fatal("expected error for empty address")
 	}
@@ -34,7 +34,7 @@ func TestQueryServerInvalidAddress(t *testing.T) {
 
 func TestQueryMultipleServersDedupAndOrder(t *testing.T) {
 	ctx := context.Background()
-	opts := Options{Timeout: time.Second, Resolver: fakeResolver}
+	opts := Options{Resolver: fakeResolver}
 
 	addrs := []string{
 		"localhost",
@@ -75,7 +75,6 @@ func liveTest(t *testing.T) {
 }
 
 // skipIfNetworkError converts typical network failures into a skip.
-// Protocol errors (server responded with garbage) still fail.
 func skipIfNetworkError(t *testing.T, err error) {
 	t.Helper()
 	if err == nil {
@@ -97,7 +96,7 @@ func TestQueryJavaLive(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	resp := QueryServer(ctx, "demo.mcstatus.io", 8*time.Second, ServerMinecraftModern)
+	resp := QueryServer(ctx, "demo.mcstatus.io", ServerMinecraftModern)
 	skipIfNetworkError(t, resp.Error)
 
 	s := resp.Payload
@@ -115,7 +114,7 @@ func TestBedrockLive(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	resp := QueryServer(ctx, "demo.mcstatus.io:19132", 8*time.Second, ServerMinecraftBedrock)
+	resp := QueryServer(ctx, "demo.mcstatus.io:19132", ServerMinecraftBedrock)
 	skipIfNetworkError(t, resp.Error)
 
 	if !resp.Payload.Online {
@@ -134,8 +133,7 @@ func TestHooksAreCalled(t *testing.T) {
 	liveTest(t)
 	var attempts, results int
 	opts := Options{
-		Timeout: 8 * time.Second,
-		Type:    ServerMinecraftModern,
+		Type: ServerMinecraftModern,
 		Hooks: Hooks{
 			OnAttempt: func(host string, proto ServerType) { attempts++ },
 			OnResult: func(host string, proto ServerType, err error, d time.Duration) {
@@ -152,17 +150,13 @@ func TestHooksAreCalled(t *testing.T) {
 }
 
 func TestHostnameSetOnlyForDomains(t *testing.T) {
-	// Заглушка для проверки логики — не требует сети.
-	// Мы проверяем, что для IP-литералов Hostname пустой.
-
-	// Прямой вызов логики:
 	if isIPLiteral("5.83.140.250") != true {
-		t.Fatal("5.83.140.250 должен определяться как IP")
+		t.Fatal("5.83.140.250 should be detected as IP")
 	}
 	if isIPLiteral("cubeverse.su") != false {
-		t.Fatal("cubeverse.su не должен определяться как IP")
+		t.Fatal("cubeverse.su should not be detected as IP")
 	}
 	if isIPLiteral("2001:db8::1") != true {
-		t.Fatal("IPv6 должен определяться как IP")
+		t.Fatal("IPv6 should be detected as IP")
 	}
 }

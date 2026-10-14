@@ -10,23 +10,14 @@ import (
 	"strings"
 )
 
-// Resolver resolves a hostname to IP addresses. The returned slice is
-// ordered by preference: IPv4 first, then IPv6.
+// Resolver resolves a hostname to IP addresses ordered by preference:
+// IPv4 first, then IPv6.
 type Resolver func(ctx context.Context, host string) ([]netip.Addr, error)
 
-// SplitHostPort parses "host:port". The port is optional; missing
-// ports default to DefaultMinecraftPort. The following forms are
-// accepted:
-//
-//	example.com           → ("example.com", 25565)
-//	example.com:25565     → ("example.com", 25565)
-//	127.0.0.1             → ("127.0.0.1", 25565)
-//	[2001:db8::1]         → ("2001:db8::1", 25565)
-//	[2001:db8::1]:25565   → ("2001:db8::1", 25565)
-//	2001:db8::1           → ("2001:db8::1", 25565)
-//	:25565                → ("127.0.0.1", 25565)
-//
-// Empty or whitespace-only input returns an error.
+// SplitHostPort parses "host:port". When the port is missing, 0 is
+// returned. Callers decide which default port to apply per protocol.
+// An empty host becomes 127.0.0.1. An empty or whitespace-only input
+// returns an error. On error, host and port are both zero values.
 func SplitHostPort(s string) (string, uint16, error) {
 	if strings.TrimSpace(s) == "" {
 		return "", 0, fmt.Errorf("invalid address %q: empty host", s)
@@ -40,7 +31,6 @@ func SplitHostPort(s string) (string, uint16, error) {
 		}
 		switch addrErr.Err {
 		case "missing port in address", "too many colons in address":
-			// Bare host or bare IPv6 literal.
 			host = strings.TrimSpace(s)
 			portStr = ""
 		default:
@@ -48,24 +38,18 @@ func SplitHostPort(s string) (string, uint16, error) {
 		}
 	}
 
-	// Strip square brackets from [IPv6] form.
 	if len(host) >= 2 && host[0] == '[' && host[len(host)-1] == ']' {
 		host = host[1 : len(host)-1]
 	}
-
 	if host == "" {
 		host = "127.0.0.1"
 	}
-
 	if portStr == "" {
-		return host, DefaultMinecraftPort, nil
+		return host, 0, nil
 	}
 	port, err := strconv.ParseUint(portStr, 10, 16)
 	if err != nil {
 		return "", 0, fmt.Errorf("invalid port %q: %w", portStr, err)
-	}
-	if port == 0 {
-		port = DefaultMinecraftPort
 	}
 	return host, uint16(port), nil
 }
@@ -104,18 +88,16 @@ func ResolvePreferred(ctx context.Context, host string) (netip.Addr, error) {
 	return addrs[0], nil
 }
 
-// isBlockedAddr reports whether addr is loopback or unspecified.
 func isBlockedAddr(a netip.Addr) bool {
 	return a.IsLoopback() || a.IsUnspecified()
 }
 
-// IsBlockedHost reports whether host should be rejected. It uses the
-// default resolver. See Options.isBlocked for the resolver-aware variant.
+// IsBlockedHost reports whether host should be rejected using the
+// default resolver.
 func IsBlockedHost(ctx context.Context, host string) bool {
 	return Options{}.isBlocked(ctx, host)
 }
 
-// resolveHost uses the configured resolver or the default one.
 func (o Options) resolveHost(ctx context.Context, host string) ([]netip.Addr, error) {
 	if o.Resolver != nil {
 		return o.Resolver(ctx, host)
@@ -123,7 +105,6 @@ func (o Options) resolveHost(ctx context.Context, host string) ([]netip.Addr, er
 	return ResolveHost(ctx, host)
 }
 
-// resolvePreferred is resolveHost returning a single address.
 func (o Options) resolvePreferred(ctx context.Context, host string) (netip.Addr, error) {
 	if addr, err := netip.ParseAddr(host); err == nil {
 		return addr, nil
@@ -135,10 +116,10 @@ func (o Options) resolvePreferred(ctx context.Context, host string) (netip.Addr,
 	return addrs[0], nil
 }
 
-// isBlocked reports whether host resolves to a blocked address.
-// "localhost" is blocked unconditionally. DNS errors are not blocking;
-// the query itself will surface them.
 func (o Options) isBlocked(ctx context.Context, host string) bool {
+	if o.AllowLocalhost {
+		return false
+	}
 	if strings.EqualFold(host, "localhost") {
 		return true
 	}
@@ -157,8 +138,7 @@ func (o Options) isBlocked(ctx context.Context, host string) bool {
 	return false
 }
 
-// IsDialError reports whether err occurred during connection setup
-// (TCP dial or UDP read/write). A protocol-level error returns false.
+// IsDialError reports whether err occurred during connection setup.
 func IsDialError(err error) bool {
 	var opErr *net.OpError
 	if !errors.As(err, &opErr) {

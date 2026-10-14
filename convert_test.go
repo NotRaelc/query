@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mcstatus-io/mcutil/v4/formatting"
-	"github.com/mcstatus-io/mcutil/v4/response"
+	"github.com/NotRaelc/mcutil/v4/formatting"
+	"github.com/NotRaelc/mcutil/v4/response"
 	"github.com/woozymasta/a2s/pkg/a2s"
 )
 

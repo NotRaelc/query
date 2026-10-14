@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/netip"
 
-	"github.com/mcstatus-io/mcutil/v4/formatting"
-	"github.com/mcstatus-io/mcutil/v4/response"
+	"github.com/NotRaelc/mcutil/v4/formatting"
+	"github.com/NotRaelc/mcutil/v4/response"
 )
 
 // fakeResolver returns a single TEST-NET-1 address (RFC 5737), so

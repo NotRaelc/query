@@ -28,16 +28,15 @@ func FuzzSplitHostPort(f *testing.F) {
 		host, port, err := SplitHostPort(s)
 		if err != nil {
 			if host != "" || port != 0 {
-				t.Fatalf("SplitHostPort(%q) = (%q, %d, %v), want empty host and zero port on error",
+				t.Fatalf("SplitHostPort(%q) = (%q, %d, %v), want zero values on error",
 					s, host, port, err)
 			}
 			return
 		}
+		// On success host must be non-empty. Port may be 0 when the
+		// input had no port — callers apply their own default.
 		if host == "" {
 			t.Fatalf("SplitHostPort(%q) returned empty host without error", s)
-		}
-		if port == 0 {
-			t.Fatalf("SplitHostPort(%q) returned zero port without error", s)
 		}
 	})
 }

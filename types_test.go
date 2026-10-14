@@ -4,29 +4,21 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
-	"time"
 )
 
 func TestOptionsWithDefaults(t *testing.T) {
 	tests := []struct {
 		name    string
 		in      Options
-		wantTO  time.Duration
 		wantMax int
 	}{
-		{"zero", Options{}, DefaultTimeout, DefaultMaxConcurrent},
-		{"timeout only", Options{Timeout: time.Second}, time.Second, DefaultMaxConcurrent},
-		{"maxconcurrent only", Options{MaxConcurrent: 5}, DefaultTimeout, 5},
-		{"both", Options{Timeout: 2 * time.Second, MaxConcurrent: 3}, 2 * time.Second, 3},
-		{"negative timeout", Options{Timeout: -1}, DefaultTimeout, DefaultMaxConcurrent},
-		{"negative max", Options{MaxConcurrent: -1}, DefaultTimeout, DefaultMaxConcurrent},
+		{"zero", Options{}, DefaultMaxConcurrent},
+		{"explicit", Options{MaxConcurrent: 5}, 5},
+		{"negative", Options{MaxConcurrent: -1}, DefaultMaxConcurrent},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := tt.in.withDefaults()
-			if got.Timeout != tt.wantTO {
-				t.Fatalf("Timeout = %s, want %s", got.Timeout, tt.wantTO)
-			}
 			if got.MaxConcurrent != tt.wantMax {
 				t.Fatalf("MaxConcurrent = %d, want %d", got.MaxConcurrent, tt.wantMax)
 			}
@@ -96,6 +88,9 @@ func TestResponseMarshalJSONError(t *testing.T) {
 	}
 	if !contains(string(data), `"error":"boom"`) {
 		t.Fatalf("unexpected JSON: %s", data)
+	}
+	if contains(string(data), `"payload"`) {
+		t.Fatalf("error response should not contain payload: %s", data)
 	}
 }
 
